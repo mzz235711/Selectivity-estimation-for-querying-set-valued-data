@@ -29,3 +29,4 @@ struct VectorHasher {
 
 typedef std::unordered_map<std::vector<int>, int, VectorHasher> Setmap;
 typedef std::vector<std::unordered_set<int>> Graph;
+typedef std::queue<std::pair<std::vector<int>, std::vector<int>>> CanQueue;
