@@ -1,32 +1,63 @@
+#include <boost/functional/hash.hpp>
 #include <vector>
-#include <string>
-#include <utility>
 #include <unordered_map>
 #include <unordered_set>
+#include <stdlib.h>
+#include <utility>
 
-struct TreeNode {
-  int level = -1;
+//typedef std::vector<std::vector<std::pair<int, int>>> Weightedgraph;
+//typedef std::vector<std::unordered_map<int, int>> Subgraph;
+
+struct TreeNode{
+  int level = 0;
   int id = -1;
   bool last_flag = false;
-  int frequency = 0;
+  int freq = 0;
   int total_freq = 0;
-  std::pair<int, int> range;
-  int hist_label = -1;
   int hist_freq = 0;
-  std::unordered_map<int, double> hist;
+  std::pair<int, int> range = std::make_pair(-1, -1);
+  int hist_val = -1;
   std::vector<TreeNode> children;
+  std::unordered_map<int, double> percentage;
+  std::vector<int> full_nodes;
+  double all_null = 1;
 };
 
-struct VectorHasher {
-    int operator()(const std::vector<int> &V) const {
-        int hash = V.size();
-        for(auto &i : V) {
-            hash ^= i + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        }
-        return hash;
+
+
+template<typename Container> // we can make this generic for any container [1]
+struct container_hash {
+    std::size_t operator()(Container const& c) const {
+        return boost::hash_range(c.begin(), c.end());
     }
 };
 
-typedef std::unordered_map<std::vector<int>, int, VectorHasher> Setmap;
-typedef std::vector<std::unordered_set<int>> Graph;
-typedef std::queue<std::pair<std::vector<int>, std::vector<int>>> CanQueue;
+
+template<class InputIterator, class T>
+InputIterator find_pair(InputIterator first, InputIterator last, const T& val) {
+  while (first != last) {
+    if ((*first).first == val) return first;
+    ++first;
+  }
+  return last;
+}
+
+template<class InputIterator, class T>
+InputIterator find_node(InputIterator first, InputIterator last, const T& val) {
+  while (first != last) {
+    if ((*first).id == val) return first;
+    ++first;
+  }
+  return last;
+}
+
+
+typedef std::vector<std::unordered_map<int, int>> Weightedgraph;
+typedef std::vector<std::vector<int>> Unweightedgraph;
+typedef std::vector<std::pair<std::vector<int>, std::vector<int>>> UnweightedDirectgraph;
+//typedef std::vector<std::vector<int>> Weightedgraph;
+typedef std::unordered_map<std::vector<int>, int, container_hash<std::vector<int>>> Vectormap;
+typedef std::vector<std::vector<int>> Setvector;
+typedef std::vector<std::vector<int>> Adjmatrix;
+
+const int FREQ_THRES = 10;

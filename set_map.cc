@@ -1,165 +1,263 @@
+#include <boost/functional/hash.hpp>
 #include <vector>
+#include <string>
+#include <fstream>
+#include <cctype>
+#include <regex>
+#include <unordered_map>
+#include <ctime>
+#include <stdlib.h>
 #include <iostream>
 #include <utility>
-#include <unordered_map>
-#include <fstream>
+#include <limits>
 #include <sstream>
-#include <algorithm>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "utils.h"
 
-void add_value(TreeNode &node, int &label, Setmap &setmap, std::vector<int> &curr_set, int &node_num) {
-  node.range.first = label;
+bool comp(std::pair<std::string,int> &a, std::pair<std::string,int> &b) {
+    return a.second > b.second;
+}
+
+int BinarySearch(std::vector<int> &arr, int l, int r, int &x) {
+  if (r >= l) {
+    int mid = l + (r - l) / 2;
+    if (arr[mid] == x) {
+      return 1;
+    } else if (arr[mid] > x) {
+      return BinarySearch(arr, l, mid - 1, x);
+    } else {
+      return BinarySearch(arr, mid + 1, r, x);
+    }
+  }
+  return 0;
+}
+
+void settrie_insert(TreeNode &root, std::vector<int> &set_key) {
+  auto *curr_node = &root;
+  for (auto &element : set_key) {
+    std::vector<TreeNode>::iterator it;
+    for (it = curr_node->children.begin(); it != curr_node->children.end(); it++) {
+      if (it->id == element) {
+	auto &new_node = *it;
+	curr_node = &new_node;
+	break;
+      } else if (it->id > element) {
+        TreeNode new_node;
+	new_node.id = element;
+	int index = it - curr_node->children.begin();
+	curr_node->children.insert(it, new_node);
+	curr_node = &(curr_node->children[index]);
+	break;
+      }
+    }
+    if (it == curr_node->children.end()) {
+      TreeNode new_node;
+      new_node.id = element;
+      curr_node->children.push_back(new_node);
+      curr_node = &(curr_node->children[curr_node->children.size() - 1]);
+    }
+  }
+  curr_node->last_flag = true;
+}
+
+void dfs_addvalue(TreeNode &curr_node, int &set_value, Vectormap &setmap, std::vector<int> &curr_set, int &node_num, int level) {
+  curr_node.range.first = set_value;
+  curr_node.level = level;
   node_num++;
-  if (node.last_flag == true) {
-    setmap[curr_set] = label;
-    label++;
+  if (curr_node.last_flag == true) {
+    //if (set_map.find(curr_set) != set_map.end()) {
+    //  auto set_value = set_map[curr_set];
+    //results.push_back(curr_node.last_flag);
+    //}
+    setmap[curr_set] = set_value;
+    set_value++;
   }
-  for (auto &child : node.children) {
+  for (auto &next_node : curr_node.children) {
+    //auto next_set = curr_set;
+    //next_set.push_back(next_node.id);
     auto next_set = curr_set;
-    next_set.push_back(child.id);
-    add_value(child, label, setmap, next_set, node_num);
+    next_set.push_back(next_node.id);
+    dfs_addvalue(next_node, set_value, setmap, next_set, node_num, level + 1);
   }
-  node.range.second = label;
+  curr_node.range.second = set_value;
 }
 
-void insert_node(TreeNode &node, std::vector<int> &set_vector, int index, int level) {
-  node.level = level;
-  if (index == set_vector.size()) {
-    node.last_flag = true;
-    return;
-  }
-  auto &w = set_vector[index];
-  int i;
-  for (i = 0; i < node.children.size(); i++) {
-    auto &child = node.children[i];
-    if (w < child.id) {
-      node.children.insert(node.children.begin() + i, TreeNode());
-      node.children[i].id = w;
-      auto &new_node = node.children[i];
-      insert_node(new_node, set_vector, index + 1, level + 1);
-      break;
-    } else if (w == child.id) {
-      insert_node(child, set_vector, index + 1, level + 1);
-      break;
-    }
-  }
-  if (i == node.children.size()) {
-    node.children.push_back(TreeNode());
-    auto &new_node = node.children[node.children.size() - 1]; 
-    new_node.id = w;
-    insert_node(new_node, set_vector, index + 1, level + 1);
+void serialize(TreeNode &curr_node, std::ofstream &file) {
+  file.write((char*)(&curr_node.level), sizeof(int));
+  file.write((char*)(&curr_node.id), sizeof(int));
+  file.write((char*)(&curr_node.last_flag), sizeof(bool));
+  file.write((char*)(&curr_node.range.first), sizeof(int));
+  file.write((char*)(&curr_node.range.second), sizeof(int));
+  for (auto &next_node : curr_node.children) {
+    serialize(next_node, file);
   }
 }
 
-void serialize(TreeNode &node, std::ofstream &outfile) {
-  outfile.write((char*)&node.level, sizeof(int));
-  outfile.write((char*)&node.id, sizeof(int));
-  outfile.write((char*)&node.last_flag, sizeof(bool));
-  outfile.write((char*)&node.range.first, sizeof(int));
-  outfile.write((char*)&node.range.second, sizeof(int)); 
-  for (auto &child : node.children) {
-    serialize(child, outfile);
-  }
-}
 
-int main(int argc, char **argv) {
-  std::ifstream dataset("gn_feature.csv"); 
+
+int main(int argc, char** argv) {
+  std::ifstream infile("../geotweet_tags.csv");
+  std::string s;
+  getline(infile, s);
+  char delimiter = ',';
+  std::regex e("[a-z]+");
+  std::unordered_map<std::string, int> all_keywords;
   std::vector<std::vector<std::string>> texts;
-  std::string line;
-  std::getline(dataset, line);
-  std::unordered_map<std::string, int> frequency;
   std::string pad = "ZZZ";
-  while (std::getline(dataset, line)) {
-    if (line[0] == '"') {
-      line = line.substr(1, line.size() - 2);
+  int tmpidx = 0;
+  while (getline(infile, s)) {
+    //size_t pos = s.find(delimiter);
+    //auto t = pos + delimiter.length();
+    //size_t pos2 = s.find(delimiter, t);
+    //std::string text = s.substr(pos + 1, pos2 - pos - 1);
+    std::string text = s;
+    if (s[0] == '"') {
+      text = text.substr(1, text.size() - 2);
     }
-    std::istringstream ss(line);
-    std::string token;
-    std::vector<std::string> text;  
-    while (std::getline(ss, token, ',')) {
-      if (std::find(text.begin(), text.end(), ss) == text.end()) {
-        text.push_back(token);
-        if (frequency.find(token) == frequency.end()) {
-          frequency[token] = 0;
+    std::string keyword;
+    //for(unsigned i = 0; i < text.size(); i++) {
+    //  text[i] = std::tolower(text[i]);
+    //}
+    std::stringstream ss(text);
+    std::vector<std::string> new_text;
+    while (std::getline(ss, keyword, delimiter)) {
+      if (std::find(new_text.begin(), new_text.end(), keyword) == new_text.end()) {
+        if (all_keywords.find(keyword) == all_keywords.end()){
+          all_keywords.emplace(keyword, 1);
         } else {
-          frequency[token] += 1;
+          all_keywords[keyword] += 1;
+	}
+        new_text.push_back(keyword);
+      }
+    }
+    texts.push_back(new_text);
+  }
+  printf("file length %lu\n", texts.size());
+  /*
+  std::vector<std::pair<std::string, int>> freq_pair(all_keywords.begin(), all_keywords.end());
+  std::sort(freq_pair.begin(), freq_pair.end(), comp);
+  std::ofstream idxoutfile("idx.csv");
+  for (int i = 0; i < freq_pair.size(); i++) {
+    auto &k = freq_pair[i].first;
+    auto &v = freq_pair[i].second;
+    if (v >= 10) {
+      idxoutfile << k << "\t" << i << "\n";
+    }
+  }
+  idxoutfile.close();
+  return 0;
+  */
+  std::vector<std::string> idx2word;
+  std::unordered_map<std::string, int> word2idx;
+  int index = 0;
+  std::ifstream idxinfile("idx.csv");
+  while (idxinfile >> s >> index) {
+    word2idx.emplace(s, index);
+    idx2word.push_back(s);
+    if (s == "abcxyz") {
+      std::cout << s << "\t" << index << "\t" << idx2word.size() << "\n";
+    }
+  }
+  word2idx[pad] = idx2word.size();
+  idx2word.push_back(pad);
+  printf("Number of keyword: %lu\n", idx2word.size());
+  std::ofstream freqfile("frequency.csv");
+  for (auto &w : idx2word) {
+    freqfile << w << "\t" << all_keywords[w] << "\n";
+  }
+  freqfile.close();
+  std::vector<std::vector<int>> text_idx;
+  for (auto &text : texts) {
+    std::vector<int> new_text;
+    for (auto t: text) {
+      if (word2idx.find(t) != word2idx.end()) {
+        new_text.push_back(word2idx[t]);
+      }
+    }
+    std::sort(new_text.begin(), new_text.end());
+    text_idx.push_back(new_text);
+  }
+
+  int v_num = idx2word.size();
+  int partition_num = atoi(argv[1]);
+  //std::string folder_name = "./graph_color";
+  std::string folder_name = "color_partition_" + std::to_string(partition_num);
+  //std::string partfilename = folder_name + "/approx_clique_part_" + std::to_string(partition_num) + ".txt";
+  std::string partfilename = folder_name + "/part.txt";
+  std::ifstream partfile(partfilename);
+  std::vector<int> partition(v_num);
+  int partid;
+  int maxpartid = 0;
+  for (int i = 0; i < v_num; i++) {
+    partfile >> partid;
+    partition[i] = partid;
+    if (partid > maxpartid) {
+      maxpartid = partid;
+    }
+  }
+  //int partition_num = maxpartid + 1;
+  std::cout << "cp1\n"; 
+  std::vector<int> dis_num(partition_num, 0);
+  std::vector<std::unordered_map<std::vector<int>, int, container_hash<std::vector<int>>>> setmap(
+		  partition_num, std::unordered_map<std::vector<int>, int, container_hash<std::vector<int>>>());
+  for (auto &idxs : text_idx) {
+    std::vector<std::vector<int>> part_idx(partition_num, std::vector<int>());
+    for (auto &idx : idxs) {
+      partid = partition[idx];
+      part_idx[partid].push_back(idx);
+    }
+    for (int i = 0; i < partition_num; i++) {
+      // Add pad to each column
+      if (part_idx[i].size() == 0) {
+        part_idx[i].push_back(word2idx[pad]);
+      }
+      if (part_idx[i].size() != 0) {
+        std::sort(part_idx[i].begin(), part_idx[i].end());
+        if (setmap[i].find(part_idx[i]) == setmap[i].end()) {
+          setmap[i][part_idx[i]] = dis_num[i];
+	  dis_num[i]++;
         }
       }
     }
-  }
-  std::ifstream idxfile("idx.csv");
-  std::vector<std::string> idx2word;
-  std::unordered_map<std::string, int> word2idx;
-  std::string word;
-  int idx;
-  while (idxfile >> word >> idx) {
-    idx2word.push_back(word);
-    word2idx[word] = idx;
-  }
-  idx2word.push_back(pad);
-  word2idx[pad] = idx2word.size() - 1;
-
-  std::vector<std::vector<int>> textidxes;
-  for (auto &text : texts) {
-    std::vector<int> textidx;
-    for (auto &t : text) {
-      if (word2idx.find(t) != word2idx.end()) {
-        textidx.push_back(word2idx[t]);
-      }
-    }
-    std::sort(textidx.begin(), textidx.end());
-    textidxes.push_back(textidx);
-  }
-
-  int partition_num = atoi(argv[1]);
-  std::string folder_name = "./color_partition_" + std::to_string(partition_num);
-  std::ifstream partfile(folder_name + "/part.txt");
-  std::vector<int> partid;
-  int p;
-  while (partfile >> p) {
-    partid.push_back(p);
-  }
+  } 
+  
   std::vector<TreeNode> settrie(partition_num, TreeNode());
-  for (auto &text : textidxes) {
-    std::vector<std::vector<int>> set_vectors(partition_num);
-    for (auto &t : text) {
-      int pid = partid[t];
-      set_vectors[pid].push_back(t);
-    }
-    for (int i = 0; i < partition_num; i++) {
-      if (set_vectors[i].size() == 0) {
-        set_vectors[i].push_back(word2idx[pad]);
-      }
-      insert_node(settrie[i], set_vectors[i], 0, 0);
-    }
-  }
-  std::vector<Setmap> setmaps(partition_num, Setmap());
-  std::vector<int> node_num(partition_num, 0);
+  std::vector<Vectormap> set_map(partition_num, Vectormap());
+  std::string output_treename = folder_name  +"/settrie.txt";
+  std::ofstream output_tree(output_treename, std::ios::out | std::ios::binary);
   for (int i = 0; i < partition_num; i++) {
-    int label = 0;
+    int node_num = 0;
+    for (auto &k_v : setmap[i]) {
+      auto set_key = k_v.first;
+      settrie_insert(settrie[i], set_key);
+    }
+    int init_value = 0;
     std::vector<int> curr_set;
-    add_value(settrie[i], label, setmaps[i], curr_set, node_num[i]);
+    dfs_addvalue(settrie[i], init_value, set_map[i], curr_set, node_num, 0);
+    output_tree.write((char*)(&node_num), sizeof(int));
+    std::cout << "node num " << i << " " << node_num << "\n";
+    serialize(settrie[i], output_tree);
   }
-
-  std::ofstream outfile(folder_name + "/dis_setmap.txt");
+  output_tree.close();
+  std::cout << "cp2\n"; 
+  std::string output_filename = folder_name + "/dis_set_map.txt";
+  std::ofstream output_file(output_filename);
   for (int i = 0; i < partition_num; i++) {
-    outfile << i << " " << setmaps[i].size() << "\n";
-    for (auto &k_v : setmaps[i]) {
-      auto &key = k_v.first;
-      auto &value = k_v.second;
-      outfile << key.size() << " ";
-      for (auto &k : key) {
-        outfile << k << " ";
+    output_file << i << " " << set_map[i].size() << "\n";
+    for (auto &k_v : set_map[i]) {
+      auto &dis_set = k_v.first;
+      auto dis_value = k_v.second;
+      output_file << dis_set.size() << " ";
+      for (auto idx : dis_set) {
+        output_file << idx << " ";
       }
-      outfile << value << "\n";
+      output_file << dis_value << "\n";
     }
   }
 
-  std::ofstream seriafile(folder_name + "/settrie.txt", std::ios::app | std::ios::binary);
-  for (int i = 0; i < partition_num; i++) {
-    seriafile.write((char*)&node_num[i], sizeof(int));
-    serialize(settrie[i], seriafile);
-  }
+
   return 0;
 }
